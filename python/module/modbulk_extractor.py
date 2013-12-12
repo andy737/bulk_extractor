@@ -1,8 +1,8 @@
 import sys
 from ctypes import *
 
-#                      return type, flag,  arg,    feature_recorder_name, feature,  feature_len, context,  context_len
-BeCallback = CFUNCTYPE(c_int,       c_int, c_uint, c_char_p,              c_char_p, c_size_t,    c_char_p, c_size_t   )
+#                      return type, flag,  arg,    feature_recorder_name, forensic path, feature,  feature_len, context,  context_len
+BeCallback = CFUNCTYPE(c_int,       c_int, c_uint, c_char_p,              c_char_p,      c_char_p, c_size_t,    c_char_p, c_size_t   )
 
 lib_be = cdll.LoadLibrary("./libbulk_extractor.so")
 lib_be.bulk_extractor_open.restype = c_void_p
@@ -36,13 +36,13 @@ class BulkExtractor():
         return False
     @staticmethod
     def wrap_callback(feature_cb=_noop_cb, histogram_cb=_noop_cb, carve_cb=_noop_cb):
-        def callback(flag, arg, recorder_name, feature, feature_len, context, context_len):
+        def callback(flag, arg, recorder_name, pos, feature, feature_len, context, context_len):
             if flag & FLAG_FEATURE:
-                return feature_cb(recorder_name, feature, context)
+                return feature_cb(recorder_name, pos, feature, context)
             elif flag & FLAG_HISTOGRAM:
-                return histogram_cb(recorder_name, feature, arg)
+                return histogram_cb(recorder_name, pos, feature, arg)
             elif flag & FLAG_CARVE:
-                return carve_cb(recorder_name, context, feature)
+                return carve_cb(recorder_name, pos, context, feature)
             return -1
         return callback
     def close(self):
@@ -56,20 +56,20 @@ class BulkExtractor():
         return bulk_extractor_analyze_buf(self.handle, buf)
 
 def main():
-    def raw_callback(flag, arg, recorder_name, feature, feature_len, context, context_len):
+    def raw_callback(flag, arg, recorder_name, pos, feature, feature_len, context, context_len):
         args = locals()
         for argname in args:
             print(str(argname), ":", str(args[argname]), end=" ")
         print()
         return 0;
 
-    def feature_callback(recorder_name, feature, context):
+    def feature_callback(recorder_name, pos, feature, context):
         print("got a feature from", recorder_name, "(", feature, ")", "(", context, ")")
         return 0;
-    def histogram_callback(recorder_name, feature, count):
+    def histogram_callback(recorder_name, pos, feature, count):
         print("got histogram data from", recorder_name, ":", feature, "x", count)
         return 0;
-    def carve_callback(recorder_name, carved_filename, carved_data):
+    def carve_callback(recorder_name, pos, carved_filename, carved_data):
         print("got carved data from", recorder_name, "with filename", carved_filename, "and length", len(carved_data))
         return 0;
 
