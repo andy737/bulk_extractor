@@ -2,7 +2,7 @@
  * This program demonstrates the bulk_extractor API.
  */
 
-#include "config.h"                              // from ../config.h
+#include "../config.h"                              // from ../config.h
 #include "bulk_extractor_api.h"
 
 #include <string>
@@ -26,6 +26,7 @@ typedef int (__cdecl *MYPROC)(LPWSTR);
 int be_cb_demo(int32_t flag,
                         uint32_t arg,
                         const char *feature_recorder_name,
+                        const char *pos, // forensic path of the feature
                         const char *feature,size_t feature_len,
                         const char *context,size_t context_len)
 {
@@ -36,85 +37,58 @@ int be_cb_demo(int32_t flag,
     return 0;
 }
 
+#ifdef HAVE_DLOPEN
+void *getsym(void *lib,const char *name)
+{
+    void *ptr = dlsym(lib,name);
+    if(ptr == 0){
+        fprintf(stderr,"dlsym('%s'): %s\n",name,dlerror());
+        exit(1);
+    }
+    return ptr;
+}
+#endif
+
 int main(int argc,char **argv)
 {
-    bulk_extractor_open_t        be_open=0;
-    bulk_extractor_analyze_buf_t be_analyze_buf=0;
-    bulk_extractor_close_t       be_close=0;
+    if(argc!=2){
+        fprintf(stderr,"usage: %s <filename>\n",argv[0]);
+        exit(1);
+    }
+    const char *fname = argv[1];
 
-#ifdef HAVE_DLOPEN
-    std::string fname = "bulk_extractor.so";
-    if(fname.find('/')==std::string::npos){
-        fname = "./" + fname;               // fedora requires a complete path name
+    std::string libname = "bulk_extractor.so";
+    if(libname.find('/')==std::string::npos){
+        libname = "./" + libname;               // fedora requires a complete path name
     }
 
 #ifdef HAVE_DLOPEN_PREFLIGHT
-    if(!dlopen_preflight(fname.c_str())){
-	fprintf(stderr,"dlopen_preflight - cannot open %s: %s",fname.c_str(),dlerror());
+    if(!dlopen_preflight(libname.c_str())){
+	fprintf(stderr,"dlopen_preflight - cannot open %s: %s",libname.c_str(),dlerror());
         exit(1);
     }
 #endif
 
-    void *lib=dlopen(fname.c_str(), RTLD_LAZY);
+    void *lib=dlopen(libname.c_str(), RTLD_LAZY);
     if(lib==0){
-        fprintf(stderr,"fname=%s\n",fname.c_str());
+        fprintf(stderr,"libname=%s\n",libname.c_str());
         fprintf(stderr,"dlopen: %s\n",dlerror());
         exit(1);
     }
 
-    bulk_extractor_enable_t be_enable = (bulk_extractor_enable_t)dlsym(lib, "bulk_extractor_enable");
-    if(be_enable==0){
-        fprintf(stderr,"dlsym: %s\n",dlerror());
-        exit(1);
-    }
-    (*be_enable)("bulk");               // enable the bulk scanner
+    bulk_extractor_set_enabled_t be_set_enabled = (bulk_extractor_set_enabled_t)getsym(lib, BULK_EXTRACTOR_SET_ENABLED);
+    bulk_extractor_open_t be_open = (bulk_extractor_open_t)getsym(lib, BULK_EXTRACTOR_OPEN);
+    bulk_extractor_analyze_dev_t be_analyze_dev = (bulk_extractor_analyze_dev_t)getsym(lib,BULK_EXTRACTOR_ANALYZE_DEV);
+    //bulk_extractor_analyze_buf_t be_analyze_buf = (bulk_extractor_analyze_buf_t)getsym(lib,BULK_EXTRACTOR_ANALYZE_BUF);
+    bulk_extractor_close_t be_close = (bulk_extractor_close_t)getsym(lib, BULK_EXTRACTOR_CLOSE);
+    (*be_set_enabled)("bulk",1);               // enable the bulk scanner
 
-    bulk_extractor_open_t be_open = (bulk_extractor_open_t)dlsym(lib, "bulk_extractor_open");
-    if(be_open==0){
-        fprintf(stderr,"dlsym: %s\n",dlerror());
-        exit(1);
-    }
-    bulk_extractor_analyze_buf_t be_analyze_buf = (bulk_extractor_analyze_buf_t)dlsym(lib, "bulk_extractor_analyze_buf");
-    if(be_analyze_buf==0){
-        fprintf(stderr,"dlsym: %s\n",dlerror());
-        exit(1);
-    }
-
-    bulk_extractor_close_t be_close = (bulk_extractor_close_t)dlsym(lib, "bulk_extractor_close");
-    if(be_close==0){
-        fprintf(stderr,"dlsym: %s\n",dlerror());
-        exit(1);
-    }
-#endif
-#ifdef HAVE_LOADLIBRARY
-    std::string fname = "bulk_extractor.dll";
-    /* Use Win32 LoadLibrary function */
-    /* See http://msdn.microsoft.com/en-us/library/ms686944(v=vs.85).aspx */
-    HINSTANCE hinstLib = LoadLibrary(TEXT(fname.c_str()));
-    if(hinstLib==0){
-        fprintf(stderr,"LoadLibrary(%s) failed",fname.c_str());
-        exit(1);
-    }
-    be_open = (bulk_extractor_open_t)GetProcAddress(hinstLib,"bulk_extractor_open");
-    if(be_open==0){
-        fprintf(stderr,"GetProcAddress(bulk_extractor_open) failed");
-        exit(1);
-    }
-    be_analyze_buf = (bulk_extractor_analyze_buf_t)GetProcAddress(hinstLib,"bulk_extractor_analyze");
-    if(be_analyze_buf==0){
-        fprintf(stderr,"GetProcAddress(bulk_extractor_analyze) failed");
-        exit(1);
-    }
-    be_close = (bulk_extractor_close_t)GetProcAddress(hinstLib,"bulk_extractor_close");
-    if(be_close==0){
-        fprintf(stderr,"GetProcAddress(bulk_extractor_close) failed");
-        exit(1);
-    }
-#endif
-
+    /* analyze the file */
     BEFILE *bef = (*be_open)(be_cb_demo);
-    const char *demo_buf = "ABCDEFG  demo@api.com Just a demo 617-555-1212 ok!";
-    (*be_analyze_buf)(bef,(uint8_t *)demo_buf,strlen(demo_buf));
+    //const char *demo_buf = "ABCDEFG  demo@api.com Just a demo 617-555-1212 ok!";
+    //(*be_analyze_buf)(bef,(uint8_t *)demo_buf,strlen(demo_buf));
+
+    (*be_analyze_dev)(bef,fname);
     (*be_close)(bef);
 
 #ifdef HAVE_DLOPEN
